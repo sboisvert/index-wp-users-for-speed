@@ -35,9 +35,6 @@ class CLI_Commands {
 	 * [--site-id=<id>]
 	 * : Site ID for multisite installations. Default: current blog ID
 	 *
-	 * [--timeout=<seconds>]
-	 * : Runtime limit in seconds per chunk. Default: 0 (no limit)
-	 *
 	 * ## EXAMPLES
 	 *
 	 *     # Run with default settings
@@ -55,70 +52,165 @@ class CLI_Commands {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function populate_meta_index_roles( $args, $assoc_args ) {
+		global $wpdb;
+
 		// Parse arguments with defaults
 		$batch_size = isset( $assoc_args['batch-size'] ) ? intval( $assoc_args['batch-size'] ) : INDEX_WP_USERS_FOR_SPEED_BATCHSIZE;
 		$chunk_size = isset( $assoc_args['chunk-size'] ) ? intval( $assoc_args['chunk-size'] ) : INDEX_WP_USERS_FOR_SPEED_CHUNKSIZE;
-		$site_id    = isset( $assoc_args['site-id'] ) ? intval( $assoc_args['site-id'] ) : null;
-		$timeout    = isset( $assoc_args['timeout'] ) ? intval( $assoc_args['timeout'] ) : 0;
+		$site_id    = isset( $assoc_args['site-id'] ) ? intval( $assoc_args['site-id'] ) : get_current_blog_id();
+
+		// Switch to the specified site in multisite
+		if ( is_multisite() ) {
+			switch_to_blog( $site_id );
+		}
 
 		WP_CLI::log( 'Starting populate meta index roles task...' );
 		WP_CLI::log( sprintf( 'Batch size: %d, Chunk size: %d', $batch_size, $chunk_size ) );
 
-		// Create and initialize the task
-		$task = new PopulateMetaIndexRoles( $batch_size, $chunk_size, $site_id, $timeout );
-		$task->init();
-
-		// Get actual user count for better progress tracking
-		global $wpdb;
+		// Get user statistics
 		$actual_user_count = $wpdb->get_var( "SELECT COUNT(*) FROM $wpdb->users" );
-		$max_user_id       = $task->maxUserId;
+		$max_user_id       = $wpdb->get_var( "SELECT MAX(ID) FROM $wpdb->users" );
+		$min_user_id       = $wpdb->get_var( "SELECT MIN(ID) FROM $wpdb->users" );
 
 		WP_CLI::log( sprintf( 'Total users: %s', number_format( $actual_user_count ) ) );
-		WP_CLI::log( sprintf( 'Max user ID: %s', number_format( $max_user_id ) ) );
-		WP_CLI::log( sprintf( 'Indexing %d roles', count( $task->roles ) ) );
+		WP_CLI::log( sprintf( 'User ID range: %s to %s', number_format( $min_user_id ), number_format( $max_user_id ) ) );
 
-		// Use actual user count for progress bar
-		$expected_chunks = ceil( $actual_user_count / $batch_size );
-		WP_CLI::log( sprintf( 'Estimated chunks: %d (may process more due to gaps in user IDs)', $expected_chunks ) );
+		// Get available roles
+		$roles      = wp_roles();
+		$role_names = $roles->get_names();
+		$role_list  = array_keys( $role_names );
 
-		// Create progress bar based on user ID range
-		$progress = \WP_CLI\Utils\make_progress_bar( 'Processing user ID ranges', ceil( $max_user_id / $batch_size ) );
+		WP_CLI::log( sprintf( 'Indexing %d roles', count( $role_list ) ) );
 
-		$chunk_count       = 0;
-		$done              = false;
-		$last_log_progress = 0;
+		// Calculate number of batches based on actual user count
+		$total_batches = ceil( $actual_user_count / $batch_size );
+		WP_CLI::log( sprintf( 'Processing %d batches of %d users each', $total_batches, $batch_size ) );
 
-		// Process chunks until complete
-		while ( ! $done ) {
-			$done = $task->doChunk();
-			$chunk_count++;
+		// Create progress bar
+		$progress = \WP_CLI\Utils\make_progress_bar( 'Processing users', $total_batches );
 
-			// Memory cleanup after each chunk
+		$offset      = 0;
+		$batch_count = 0;
+
+		// Process users in batches based on actual user IDs, not ID ranges
+		while ( $offset < $actual_user_count ) {
+			$batch_count++;
+
+			// Get actual user IDs for this batch
+			$user_ids = $wpdb->get_col( $wpdb->prepare(
+				"SELECT ID FROM $wpdb->users ORDER BY ID LIMIT %d OFFSET %d",
+				$batch_size,
+				$offset
+			) );
+
+			if ( empty( $user_ids ) ) {
+				break;
+			}
+
+			// Process this batch in chunks to avoid locking
+			$this->process_user_batch( $user_ids, $chunk_size, $role_list );
+
+			// Memory cleanup after each batch
 			$this->in_memory_cleanup();
 
 			// Update progress
 			$progress->tick();
+			$offset += $batch_size;
 
-			// Log progress every 5% or every 10 chunks, whichever comes first
-			$current_progress = $task->fractionComplete * 100;
-			if ( ( $current_progress - $last_log_progress >= 5 ) || ( $chunk_count % 10 === 0 ) ) {
+			// Log progress every 10 batches
+			if ( $batch_count % 10 === 0 ) {
+				$current_progress = ( $offset / $actual_user_count ) * 100;
 				WP_CLI::log( sprintf(
-					'Progress: %.1f%% (user ID range: %s/%s)',
-					$current_progress,
-					number_format( $task->currentStart ),
-					number_format( $max_user_id )
+					'Progress: %.1f%% (%s/%s users)',
+					min( 100, $current_progress ),
+					number_format( min( $offset, $actual_user_count ) ),
+					number_format( $actual_user_count )
 				) );
-				$last_log_progress = $current_progress;
 			}
 		}
 
 		$progress->finish();
 
+		// Update table statistics
+		WP_CLI::log( 'Updating table statistics...' );
+		$wpdb->query( "ANALYZE TABLE $wpdb->usermeta" );
+
+		// Restore blog if multisite
+		if ( is_multisite() ) {
+			restore_current_blog();
+		}
+
 		WP_CLI::success( sprintf(
-			'Completed! Processed %d chunks covering user IDs 0-%s. All user role metadata indexes have been created.',
-			$chunk_count,
-			number_format( $max_user_id )
+			'Completed! Processed %s users in %d batches. All user role metadata indexes have been created.',
+			number_format( $actual_user_count ),
+			$batch_count
 		) );
+	}
+
+	/**
+	 * Process a batch of users by their IDs.
+	 *
+	 * @param array $user_ids   Array of user IDs to process.
+	 * @param int   $chunk_size Number of users per transaction.
+	 * @param array $roles      Array of role names to index.
+	 */
+	private function process_user_batch( $user_ids, $chunk_size, $roles ) {
+		global $wpdb;
+
+		$prefix          = $wpdb->prefix . INDEX_WP_USERS_FOR_SPEED_KEY_PREFIX . 'r:';
+		$capabilitiesKey = $wpdb->prefix . 'capabilities';
+
+		// Split user IDs into chunks for transaction safety
+		$chunks = array_chunk( $user_ids, $chunk_size );
+
+		foreach ( $chunks as $chunk ) {
+			// Create a comma-separated list of user IDs for the WHERE IN clause
+			$user_id_list = implode( ',', array_map( 'intval', $chunk ) );
+
+			// Start transaction
+			$wpdb->query( 'BEGIN' );
+
+			// Lock the relevant rows
+			$wpdb->query( $wpdb->prepare(
+				"SELECT COUNT(*) FROM $wpdb->usermeta WHERE meta_key = %s AND user_id IN ($user_id_list) FOR UPDATE",
+				$capabilitiesKey
+			) );
+
+			// Build and execute queries for each role
+			foreach ( $roles as $role ) {
+				$prefixedRole = $prefix . $role;
+				$escapedRole  = $wpdb->esc_like( $role );
+
+				// Delete incorrect role metadata
+				$deleteQuery = "DELETE a FROM $wpdb->usermeta a
+					LEFT JOIN $wpdb->usermeta b
+						ON a.user_id = b.user_id
+						AND b.meta_key = %s
+						AND b.meta_value LIKE CONCAT('%%', %s, '%%')
+					WHERE a.meta_key = %s
+						AND b.umeta_id IS NULL
+						AND a.user_id IN ($user_id_list)";
+
+				$wpdb->query( $wpdb->prepare( $deleteQuery, $capabilitiesKey, $escapedRole, $prefixedRole ) );
+
+				// Insert missing role metadata
+				$insertQuery = "INSERT INTO $wpdb->usermeta (user_id, meta_key)
+					SELECT a.user_id, %s
+					FROM $wpdb->usermeta a
+					LEFT JOIN $wpdb->usermeta b
+						ON a.user_id = b.user_id
+						AND b.meta_key = %s
+					WHERE a.meta_key = %s
+						AND a.meta_value LIKE CONCAT('%%', %s, '%%')
+						AND b.user_id IS NULL
+						AND a.user_id IN ($user_id_list)";
+
+				$wpdb->query( $wpdb->prepare( $insertQuery, $prefixedRole, $prefixedRole, $capabilitiesKey, $escapedRole ) );
+			}
+
+			// Commit transaction
+			$wpdb->query( 'COMMIT' );
+		}
 	}
 
 	/**
