@@ -49,6 +49,8 @@ class CLI_Commands {
 	 *     # Run for a specific site in multisite
 	 *     wp index-wp-users populate-meta-index-roles --site-id=2
 	 *
+	 * @subcommand populate-meta-index-roles
+	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
