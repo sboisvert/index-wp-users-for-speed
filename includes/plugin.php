@@ -67,6 +67,7 @@ class Index_Wp_Users_For_Speed {
 
     /* WP-CLI commands */
     if ( defined( 'WP_CLI' ) && WP_CLI ) {
+      require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/indexer.php';
       require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/cli-commands.php';
     }
 
