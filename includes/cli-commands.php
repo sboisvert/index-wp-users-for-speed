@@ -68,16 +68,25 @@ class CLI_Commands {
 		$task = new PopulateMetaIndexRoles( $batch_size, $chunk_size, $site_id, $timeout );
 		$task->init();
 
-		// Get max user ID for progress tracking
-		$max_user_id = $task->maxUserId;
-		WP_CLI::log( sprintf( 'Processing up to user ID: %d', $max_user_id ) );
+		// Get actual user count for better progress tracking
+		global $wpdb;
+		$actual_user_count = $wpdb->get_var( "SELECT COUNT(*) FROM $wpdb->users" );
+		$max_user_id       = $task->maxUserId;
+
+		WP_CLI::log( sprintf( 'Total users: %s', number_format( $actual_user_count ) ) );
+		WP_CLI::log( sprintf( 'Max user ID: %s', number_format( $max_user_id ) ) );
 		WP_CLI::log( sprintf( 'Indexing %d roles', count( $task->roles ) ) );
 
-		// Create progress bar
-		$progress = \WP_CLI\Utils\make_progress_bar( 'Processing users', ceil( $max_user_id / $batch_size ) );
+		// Use actual user count for progress bar
+		$expected_chunks = ceil( $actual_user_count / $batch_size );
+		WP_CLI::log( sprintf( 'Estimated chunks: %d (may process more due to gaps in user IDs)', $expected_chunks ) );
 
-		$chunk_count = 0;
-		$done        = false;
+		// Create progress bar based on user ID range
+		$progress = \WP_CLI\Utils\make_progress_bar( 'Processing user ID ranges', ceil( $max_user_id / $batch_size ) );
+
+		$chunk_count       = 0;
+		$done              = false;
+		$last_log_progress = 0;
 
 		// Process chunks until complete
 		while ( ! $done ) {
@@ -90,18 +99,25 @@ class CLI_Commands {
 			// Update progress
 			$progress->tick();
 
-			// Optional: Log progress every 10 chunks
-			if ( $chunk_count % 10 === 0 ) {
-				$current_progress = $task->fractionComplete * 100;
-				WP_CLI::log( sprintf( 'Progress: %.2f%% (processed %d users)', $current_progress, $task->currentStart ) );
+			// Log progress every 5% or every 10 chunks, whichever comes first
+			$current_progress = $task->fractionComplete * 100;
+			if ( ( $current_progress - $last_log_progress >= 5 ) || ( $chunk_count % 10 === 0 ) ) {
+				WP_CLI::log( sprintf(
+					'Progress: %.1f%% (user ID range: %s/%s)',
+					$current_progress,
+					number_format( $task->currentStart ),
+					number_format( $max_user_id )
+				) );
+				$last_log_progress = $current_progress;
 			}
 		}
 
 		$progress->finish();
 
 		WP_CLI::success( sprintf(
-			'Completed! Processed %d chunks. All user role metadata indexes have been created.',
-			$chunk_count
+			'Completed! Processed %d chunks covering user IDs 0-%s. All user role metadata indexes have been created.',
+			$chunk_count,
+			number_format( $max_user_id )
 		) );
 	}
 
