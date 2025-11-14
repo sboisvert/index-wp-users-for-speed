@@ -107,6 +107,45 @@ Install and activate this plugin in the usual way via the Plugins panel in your 
 `wp plugin install index-wp-users-for-speed
 wp plugin activate index-wp-users-for-speed
 `
+
+#### WP-CLI Commands
+
+This plugin provides WP-CLI commands for managing user indexes, which is especially useful for large sites or automated deployments.
+
+**Populate meta index for user roles:**
+
+```bash
+wp index-wp-users populate-meta-index-roles [--batch-size=<size>] [--chunk-size=<size>] [--site-id=<id>] [--timeout=<seconds>]
+```
+
+This command processes all users and creates metadata indexes for their roles. It runs synchronously and displays progress.
+
+Options:
+- `--batch-size=<size>`: Number of users to process per batch (default: 5000)
+- `--chunk-size=<size>`: Number of users per transaction (default: 50)
+- `--site-id=<id>`: Site ID for multisite installations (default: current blog)
+- `--timeout=<seconds>`: Runtime limit per chunk (default: 0, no limit)
+
+**Rebuild all indexes:**
+
+```bash
+wp index-wp-users rebuild
+```
+
+Schedules a complete rebuild of all user indexes via WP-Cron.
+
+**Clean up all indexes:**
+
+```bash
+wp index-wp-users cleanup
+```
+
+Removes all metadata indexes created by the plugin.
+
+**Memory Management:**
+
+All WP-CLI commands include automatic memory cleanup after each batch, based on best practices from Automattic's VIP platform. This prevents memory exhaustion during bulk operations on large sites.
+
 ### Composer
 
 If you configure your WordPress installation using composer, you may install this plugin into your WordPress top level configuration with this command.
