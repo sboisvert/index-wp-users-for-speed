@@ -65,6 +65,12 @@ class Index_Wp_Users_For_Speed {
       require_once plugin_dir_path( dirname( __FILE__ ) ) . 'admin/progressbar.php';
     }
 
+    /* WP-CLI commands */
+    if ( defined( 'WP_CLI' ) && WP_CLI ) {
+      require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/indexer.php';
+      require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/cli-commands.php';
+    }
+
     /* Disabled-cron only. We use WP_Cron's wp_schedule_single_event to do the batched-up index, so
      * we need to activate it when it's disabled.  */
     if ( ! wp_doing_cron() ) {
