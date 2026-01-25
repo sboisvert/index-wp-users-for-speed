@@ -110,12 +110,12 @@ wp plugin activate index-wp-users-for-speed
 
 #### WP-CLI Commands
 
-This plugin provides WP-CLI commands for managing user indexes, which is especially useful for large sites or automated deployments.
+This plugin provides WP-CLI commands for managing user indexes, which is especially useful for large sites, automated deployments, and environments where WP-Cron is disabled.
 
 **Populate meta index for user roles:**
 
 ```bash
-wp index-wp-users populate-meta-index-roles [--batch-size=<size>] [--chunk-size=<size>] [--site-id=<id>] [--timeout=<seconds>]
+wp index-wp-users populate-meta-index-roles [--batch-size=<size>] [--chunk-size=<size>] [--timeout=<seconds>] [--dry-run]
 ```
 
 This command processes all users and creates metadata indexes for their roles. It runs synchronously and displays progress.
@@ -123,28 +123,88 @@ This command processes all users and creates metadata indexes for their roles. I
 Options:
 - `--batch-size=<size>`: Number of users to process per batch (default: 5000)
 - `--chunk-size=<size>`: Number of users per transaction (default: 50)
-- `--site-id=<id>`: Site ID for multisite installations (default: current blog)
-- `--timeout=<seconds>`: Runtime limit per chunk (default: 0, no limit)
+- `--timeout=<seconds>`: Runtime limit per chunk in seconds (default: 0, no limit)
+- `--dry-run`: Preview what would happen without making changes
+
+Examples:
+```bash
+# Run with default settings
+wp index-wp-users populate-meta-index-roles
+
+# Run with custom batch size
+wp index-wp-users populate-meta-index-roles --batch-size=10000 --chunk-size=100
+
+# Preview without making changes
+wp index-wp-users populate-meta-index-roles --dry-run
+
+# For multisite, use --url to specify the site
+wp index-wp-users populate-meta-index-roles --url=site2.example.com
+```
 
 **Rebuild all indexes:**
 
 ```bash
-wp index-wp-users rebuild
+wp index-wp-users rebuild [--batch-size=<size>] [--chunk-size=<size>]
 ```
 
-Schedules a complete rebuild of all user indexes via WP-Cron.
+Performs a complete rebuild of all user indexes immediately (not via WP-Cron). This includes:
+1. Cleaning up old indexes
+2. Counting users by role
+3. Identifying users with edit capabilities
+4. Rebuilding role metadata indexes
+
+Examples:
+```bash
+# Rebuild all indexes
+wp index-wp-users rebuild
+
+# Rebuild with custom batch size
+wp index-wp-users rebuild --batch-size=10000
+```
+
+**Check index status:**
+
+```bash
+wp index-wp-users status [--format=<format>]
+```
+
+Displays information about the current state of user indexes including counts, completion status, and index coverage.
+
+Options:
+- `--format=<format>`: Output format (table, json, yaml). Default: table
+
+Examples:
+```bash
+# Show status as table
+wp index-wp-users status
+
+# Get status as JSON for scripting
+wp index-wp-users status --format=json
+```
 
 **Clean up all indexes:**
 
 ```bash
-wp index-wp-users cleanup
+wp index-wp-users cleanup [--yes]
 ```
 
-Removes all metadata indexes created by the plugin.
+Removes all metadata indexes created by the plugin. Useful before deactivation or when troubleshooting.
+
+Options:
+- `--yes`: Skip confirmation prompt
+
+Examples:
+```bash
+# Clean up with confirmation
+wp index-wp-users cleanup
+
+# Clean up without confirmation
+wp index-wp-users cleanup --yes
+```
 
 **Memory Management:**
 
-All WP-CLI commands include automatic memory cleanup after each batch, based on best practices from Automattic's VIP platform. This prevents memory exhaustion during bulk operations on large sites.
+All WP-CLI commands include automatic memory cleanup after each batch, based on best practices from Automattic's VIP platform. This prevents memory exhaustion during bulk operations on large sites with millions of users.
 
 ### Composer
 
