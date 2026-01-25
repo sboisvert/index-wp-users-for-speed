@@ -171,7 +171,7 @@ wp index-wp-users status [--format=<format>]
 Displays information about the current state of user indexes including counts, completion status, and index coverage.
 
 Options:
-- `--format=<format>`: Output format (table, json, yaml). Default: table
+- `--format=<format>`: Output format (table, json). Default: table
 
 Examples:
 ```bash

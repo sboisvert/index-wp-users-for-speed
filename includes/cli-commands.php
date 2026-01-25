@@ -10,7 +10,6 @@ namespace IndexWpUsersForSpeed;
 use Exception;
 use WP_CLI;
 use function WP_CLI\Utils\make_progress_bar;
-use function WP_CLI\Utils\mustache_render;
 
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
@@ -306,7 +305,8 @@ class CLI_Commands {
 				ceil( $role_task->maxUserId / $batch_size )
 			);
 
-			while ( ! $role_task->doChunk() ) {
+			while ( true ) {
+				$done = $role_task->doChunk();
 				++$batch_count;
 				$this->in_memory_cleanup();
 				$progress->tick();
@@ -316,6 +316,10 @@ class CLI_Commands {
 					$progress_pct = $role_task->fractionComplete * 100;
 					$memory_mb    = round( memory_get_usage() / 1024 / 1024, 2 );
 					WP_CLI::log( sprintf( 'Progress: %.1f%% | Memory: %s MB', $progress_pct, $memory_mb ) );
+				}
+
+				if ( $done ) {
+					break;
 				}
 			}
 
@@ -418,7 +422,7 @@ class CLI_Commands {
 	 * ## OPTIONS
 	 *
 	 * [--format=<format>]
-	 * : Output format. Options: table, json, yaml. Default: table
+	 * : Output format. Options: table, json. Default: table
 	 *
 	 * ## EXAMPLES
 	 *
@@ -478,7 +482,7 @@ class CLI_Commands {
 			$status_color = '%R';
 		}
 
-		if ( $format === 'json' || $format === 'yaml' ) {
+		if ( $format === 'json' ) {
 			$data = [
 				'total_users'    => intval( $user_count ),
 				'min_user_id'    => intval( $min_user_id ),
@@ -489,11 +493,7 @@ class CLI_Commands {
 				'completion_pct' => round( $meta_fraction * 100, 1 ),
 			];
 
-			if ( $format === 'json' ) {
-				WP_CLI::log( json_encode( $data, JSON_PRETTY_PRINT ) );
-			} else {
-				WP_CLI::log( mustache_render( 'status-template.mustache', $data ) );
-			}
+			WP_CLI::log( json_encode( $data, JSON_PRETTY_PRINT ) );
 		} else {
 			// Table format (default)
 			WP_CLI::log( WP_CLI::colorize( '%GUser Index Status%n' ) );
@@ -505,7 +505,7 @@ class CLI_Commands {
 			WP_CLI::log( '' );
 			WP_CLI::log( sprintf( '%-30s %s', 'Role Index Status:', WP_CLI::colorize( $status_color . $status_label . '%n' ) ) );
 
-			if ( $index_count > 0 && $user_count > 0 ) {
+			if ( $index_count > 0 && $user_count > 0 && $role_count > 0 ) {
 				$expected_records = $user_count * $role_count;
 				$coverage_pct     = ( $index_count / $expected_records ) * 100;
 				WP_CLI::log( sprintf( '%-30s %.1f%%', 'Index Coverage:', min( 100, $coverage_pct ) ) );
