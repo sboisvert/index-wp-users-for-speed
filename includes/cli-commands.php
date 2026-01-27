@@ -457,6 +457,15 @@ class CLI_Commands {
 			)
 		);
 
+		// Count users with capabilities (users that have roles assigned)
+		$capabilities_key = $wpdb->prefix . 'capabilities';
+		$users_with_roles = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(DISTINCT user_id) FROM $wpdb->usermeta WHERE meta_key = %s",
+				$capabilities_key
+			)
+		);
+
 		// Get roles
 		$roles      = wp_roles();
 		$role_names = $roles->get_names();
@@ -505,10 +514,20 @@ class CLI_Commands {
 			WP_CLI::log( '' );
 			WP_CLI::log( sprintf( '%-30s %s', 'Role Index Status:', WP_CLI::colorize( $status_color . $status_label . '%n' ) ) );
 
-			if ( $index_count > 0 && $user_count > 0 && $role_count > 0 ) {
-				$expected_records = $user_count * $role_count;
-				$coverage_pct     = ( $index_count / $expected_records ) * 100;
-				WP_CLI::log( sprintf( '%-30s %.1f%%', 'Index Coverage:', min( 100, $coverage_pct ) ) );
+			// Show coverage based on users with roles, not theoretical maximum
+			if ( $index_count > 0 && $users_with_roles > 0 ) {
+				// Each user with a role should have at least one index record
+				// Users with multiple roles will have multiple index records
+				$avg_records_per_user = $index_count / $users_with_roles;
+				$coverage_pct         = min( 100, ( $index_count / $users_with_roles ) * 100 );
+				if ( $avg_records_per_user >= 1.0 ) {
+					WP_CLI::log( sprintf( '%-30s %.1f%% (%.1f records/user, %d records for %d users with roles)', 'Index Coverage:', $coverage_pct, $avg_records_per_user, $index_count, $users_with_roles ) );
+				} else {
+					WP_CLI::log( sprintf( '%-30s %.1f%% (%d records for %d users with roles)', 'Index Coverage:', $coverage_pct, $index_count, $users_with_roles ) );
+				}
+			} elseif ( $index_count > 0 ) {
+				// Fallback if no users with roles found
+				WP_CLI::log( sprintf( '%-30s %d index records found', 'Index Records:', $index_count ) );
 			}
 		}
 	}
